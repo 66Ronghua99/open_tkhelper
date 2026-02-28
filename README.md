@@ -133,6 +133,7 @@ export ANTHROPIC_API_KEY=your_api_key_here
 # 或者使用 opencode 配置
 opencode config set api_key your_api_key_here
 ```
+但更推荐大家购买[Minimax的coding plan](https://platform.minimaxi.com/subscribe/coding-plan)，量大管饱，登陆简单。适合做这种比较浪费token琐碎的事情。
 
 ## 使用方式
 
