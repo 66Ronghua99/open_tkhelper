@@ -32,6 +32,8 @@
 
 ### 快速安装（推荐）
 
+#### macOS / Linux
+
 使用一键安装脚本自动完成所有配置：
 
 ```bash
@@ -39,6 +41,35 @@ git clone https://github.com/66Ronghua99/open_tkhelper.git
 cd open_tkhelper
 chmod +x setup.sh
 ./setup.sh
+```
+
+#### Windows
+
+**方式 1：PowerShell 脚本（推荐）**
+
+```powershell
+# 克隆仓库
+git clone https://github.com/66Ronghua99/open_tkhelper.git
+cd open_tkhelper
+
+# 运行安装脚本（可能需要以管理员身份运行 PowerShell）
+.\setup.ps1
+```
+
+**方式 2：命令提示符 (CMD)**
+
+```cmd
+# 克隆仓库
+git clone https://github.com/66Ronghua99/open_tkhelper.git
+cd open_tkhelper
+
+# 运行安装脚本
+setup.bat
+```
+
+**注意**：如果 PowerShell 脚本无法运行，可能需要先设置执行策略：
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
 该脚本会自动完成：
@@ -117,6 +148,7 @@ uv run python browser_launcher.py
 
 **终端 2 - 运行 Agent：**
 
+**macOS / Linux：**
 ```bash
 # 设置环境变量
 export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222
@@ -125,8 +157,25 @@ export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222
 uv run python agent_runner.py
 ```
 
-或者单次运行：
+**Windows (PowerShell)：**
+```powershell
+# 设置环境变量
+$env:PLAYWRIGHT_MCP_CDP_ENDPOINT = "http://localhost:9222"
 
+# 运行 Agent
+uv run python agent_runner.py
+```
+
+**Windows (CMD)：**
+```cmd
+# 设置环境变量
+set PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222
+
+# 运行 Agent
+uv run python agent_runner.py
+```
+
+或者单次运行（macOS/Linux）：
 ```bash
 PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222 uv run python agent_runner.py
 ```
@@ -156,7 +205,9 @@ kill $BROWSER_PID
 
 | 文件 | 说明 |
 |------|------|
-| `setup.sh` | **一键安装脚本** - 自动完成所有环境配置 |
+| `setup.sh` | **macOS/Linux 一键安装脚本** |
+| `setup.bat` | **Windows CMD 一键安装脚本** |
+| `setup.ps1` | **Windows PowerShell 一键安装脚本** |
 | `browser_launcher.py` | 浏览器启动器，管理 CDP 浏览器实例 |
 | `agent_runner.py` | Agent 操作脚本，调用 OpenCode 执行客服任务 |
 | `ralph_state.json` | 已回复消息记录（自动生成） |
@@ -261,9 +312,25 @@ CDP_PORT = 9222  # Chrome DevTools Protocol 端口
 
 ## 故障排查
 
+### Windows: PowerShell 脚本无法运行
+
+如果遇到 "无法加载脚本" 错误，需要设置执行策略：
+
+```powershell
+# 临时设置（推荐）
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# 然后运行脚本
+.\setup.ps1
+```
+
 ### OpenCode 未找到 MCP
 
 ```bash
+# macOS / Linux
+opencode mcp add --name playwright --command npx --args "@playwright/mcp@latest"
+
+# Windows
 opencode mcp add --name playwright --command npx --args "@playwright/mcp@latest"
 ```
 
