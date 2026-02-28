@@ -34,6 +34,7 @@ Ralph Loop 是一个 TikTok 客服自动回复工具，使用 Playwright 监控 
 - [x] **MCP 配置更新** - 使用 `@playwright/mcp@latest` 支持 CDP
 - [x] **脚本分离** - 将 `ralph_loop.py` 拆分为 `browser_launcher.py` 和 `agent_runner.py`
 - [x] **文档完善** - 更新 README.md，添加完整的安装配置说明
+- [x] **一键安装脚本** - 创建 setup.sh 自动完成环境配置
 
 ### 待办事项 📝
 - [ ] 测试 CDP 连接是否正常工作

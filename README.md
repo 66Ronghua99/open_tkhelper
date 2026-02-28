@@ -30,14 +30,38 @@
 
 ## 安装配置
 
-### 1. 克隆仓库
+### 快速安装（推荐）
+
+使用一键安装脚本自动完成所有配置：
+
+```bash
+git clone https://github.com/66Ronghua99/open_tkhelper.git
+cd open_tkhelper
+chmod +x setup.sh
+./setup.sh
+```
+
+该脚本会自动完成：
+- ✅ 检查并安装 uv (Python 包管理器)
+- ✅ 检查 Node.js 和 npm
+- ✅ 检查并安装 OpenCode CLI
+- ✅ 配置 Playwright MCP
+- ✅ 安装 Python 依赖
+- ✅ 安装 Chromium 浏览器
+- ✅ 检查 ANTHROPIC_API_KEY
+
+### 手动安装
+
+如果你更喜欢手动配置，或一键安装脚本在你的环境遇到问题，可以按以下步骤操作：
+
+#### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/66Ronghua99/open_tkhelper.git
 cd open_tkhelper
 ```
 
-### 2. 安装 Python 依赖
+#### 2. 安装 Python 依赖
 
 本项目使用 `uv` 作为包管理器：
 
@@ -49,7 +73,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
-### 3. 安装 OpenCode CLI
+#### 3. 安装 OpenCode CLI
 
 ```bash
 # 通过 npm 安装
@@ -59,7 +83,7 @@ npm install -g opencode
 opencode --version
 ```
 
-### 4. 配置 Playwright MCP
+#### 4. 配置 Playwright MCP
 
 ```bash
 # 检查是否已配置
@@ -69,7 +93,7 @@ opencode mcp list
 opencode mcp add --name playwright --command npx --args "@playwright/mcp@latest"
 ```
 
-### 5. 配置 OpenCode API Key
+#### 5. 配置 OpenCode API Key
 
 ```bash
 # 设置环境变量
@@ -132,6 +156,7 @@ kill $BROWSER_PID
 
 | 文件 | 说明 |
 |------|------|
+| `setup.sh` | **一键安装脚本** - 自动完成所有环境配置 |
 | `browser_launcher.py` | 浏览器启动器，管理 CDP 浏览器实例 |
 | `agent_runner.py` | Agent 操作脚本，调用 OpenCode 执行客服任务 |
 | `ralph_state.json` | 已回复消息记录（自动生成） |
