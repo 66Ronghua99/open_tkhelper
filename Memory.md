@@ -2,41 +2,74 @@
 
 ## 技术决策记录
 
-### 2026-02-28 架构重构: OpenCode 全自主模式
+### 2026-02-28 CDP 持久浏览器模式
 
 **问题描述**:
-- 旧架构中 Ralph Loop 负责浏览器管理，OpenCode 只负责回复
-- 代码复杂度高，需要维护大量 Playwright 选择器和页面操作逻辑
-- 检查间隔太短（30秒），资源消耗较大
+- 每次调用 OpenCode 都启动新浏览器，效率低下
+- 登录状态需要频繁重新验证
 
-**新架构方案**:
-- **Ralph Loop**: 极简定时触发器（15分钟周期）
-- **OpenCode**: 全自主完成所有浏览器操作（启动、检测、回复、关闭）
+**解决方案**:
+使用 CDP (Chrome DevTools Protocol) 连接持久浏览器实例
 
-**关键变更**:
+**关键实现**:
 ```python
-# 旧架构: Ralph 管理浏览器
-async with async_playwright() as p:
-    context = await p.chromium.launch_persistent_context(...)
-    page = context.pages[0]
-    # Ralph 检测消息、调用 OpenCode 仅回复
+# 1. Python 启动浏览器并暴露 CDP
+from playwright.sync_api import sync_playwright
 
-# 新架构: OpenCode 全权负责
+self.playwright = sync_playwright().start()
+self.context = self.playwright.chromium.launch_persistent_context(
+    user_data_dir=str(self.user_data_dir),
+    args=[f"--remote-debugging-port={cdp_port}"],
+    headless=False,
+)
+
+# 2. 设置环境变量调用 OpenCode
+env = os.environ.copy()
+env["PLAYWRIGHT_MCP_CDP_ENDPOINT"] = f"http://localhost:{cdp_port}"
+
+subprocess.Popen(
+    ["opencode", "run", ...],
+    env=env,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
+
+# 3. 提示词中告知浏览器已连接
 prompt = """
-请使用 Playwright MCP 工具:
-1. 启动浏览器（使用 browser_launch，指定 user_data_dir）
-2. 导航到 TikTok 客服页面
-3. 检查并回复消息
-4. 关闭浏览器
+## 重要说明
+- 浏览器已经通过 CDP 连接启动，**不要**使用 browser_launch
+- 直接使用 browser_navigate 等工具操作页面
 """
-subprocess.run(["opencode", "run", ...], ...)
+```
+
+**MCP 配置**:
+```bash
+# 使用 @playwright/mcp 替代 @anthropic/playwright-mcp-server
+opencode mcp add --name playwright --command npx --args "@playwright/mcp@latest"
+```
+
+**流式输出调试**:
+```python
+import select
+import fcntl
+
+# 设置非阻塞模式
+fd = process.stdout.fileno()
+fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
+# 实时读取输出
+while True:
+    line = process.stdout.readline()
+    if line:
+        print(f"[OpenCode stdout] {line}")
 ```
 
 **优势**:
-- 代码量减少 50%（~400行 -> ~200行）
-- Ralph 无需维护 Playwright 选择器
-- OpenCode 可直接使用 MCP 工具灵活操作页面
-- 更长的检查间隔，资源消耗更低
+- 浏览器只启动一次，大幅减少资源消耗
+- 登录状态持久保持
+- OpenCode 启动更快（无需等待浏览器启动）
+- 实时输出便于调试
 
 ---
 
@@ -93,7 +126,12 @@ context = await p.chromium.launch_persistent_context(
        log("页面加载超时，继续执行...", "WARN")
    ```
 
-6. **OpenCode 全自主模式注意**:
-   - 需要在提示词中明确指定 `user_data_dir` 参数
-   - OpenCode 的 Playwright MCP 工具需要正确配置
-   - 返回结果需要通过 JSON 格式解析
+6. **CDP 环境变量**:
+   - 环境变量名称: `PLAYWRIGHT_MCP_CDP_ENDPOINT`
+   - 格式: `http://localhost:9222` 或 WebSocket URL
+   - 需要传递给 OpenCode 进程的环境变量中
+
+7. **流式输出注意**:
+   - 使用 `fcntl` 设置非阻塞模式才能实时读取
+   - 需要处理 `BlockingIOError` 异常
+   - 超时控制很重要，避免进程无限等待

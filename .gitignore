@@ -14,3 +14,13 @@ tiktok_cookies.json
 ralph_state.json
 debug_screenshot.png
 debug_page.html
+
+# Browser data (persistent context)
+browser_data/
+
+# Debug files
+debug_selectors.py
+inbox_snapshot.md
+
+# Screenshots
+tiktok_inbox*.png
