@@ -5,11 +5,24 @@ Browser Launcher - CDP 浏览器启动脚本
 负责启动浏览器并暴露 CDP endpoint，供 Agent 连接使用。
 浏览器保持运行直到手动停止。
 
-用法:
-    uv run python browser_launcher.py
+【使用方法】
 
-环境变量输出:
-    启动成功后会显示 PLAYWRIGHT_MCP_CDP_ENDPOINT 环境变量值
+1. 启动浏览器（终端1）：
+   uv run python browser_launcher.py
+
+2. 在另一个终端运行 Agent（终端2）：
+   export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222
+   uv run python agent_runner.py
+
+【前置要求】
+- 已安装 Playwright: uv run playwright install chromium
+- 已安装 OpenCode: npm install -g opencode
+- 已配置 Playwright MCP: opencode mcp add --name playwright --command npx --args "@playwright/mcp@latest"
+
+【注意】
+- 首次运行需要手动登录 TikTok，登录状态会自动保存
+- 保持此脚本运行以维持浏览器状态
+- 按 Ctrl+C 停止浏览器
 """
 
 import sys

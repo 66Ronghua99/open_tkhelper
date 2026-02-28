@@ -2,19 +2,38 @@
 """
 Agent Runner - TikTok 客服 Agent 操作脚本
 
-负责调用 OpenCode 执行具体的客服操作。
+负责调用 OpenCode 执行具体的客服操作（检查未读消息、自动回复）。
 需要配合 browser_launcher.py 启动的 CDP 浏览器使用。
 
-用法:
-    # 先启动浏览器（终端1）
-    uv run python browser_launcher.py
+【使用方法】
 
-    # 再运行 Agent（终端2）
-    export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222
-    uv run python agent_runner.py
+1. 先启动浏览器（终端1）：
+   uv run python browser_launcher.py
 
-    # 或者单次运行
-    PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222 uv run python agent_runner.py
+2. 再运行 Agent（终端2）：
+   export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222
+   uv run python agent_runner.py
+
+3. 或者单次运行：
+   PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222 uv run python agent_runner.py
+
+【配置说明】
+- CHECK_INTERVAL: 检查间隔（默认 300 秒 = 5 分钟）
+- TIKTOK_URL: TikTok 客服页面地址
+- STATE_FILE: 已回复消息记录文件
+
+【前置要求】
+- OpenCode CLI 已安装: npm install -g opencode
+- ANTHROPIC_API_KEY 已设置: export ANTHROPIC_API_KEY=your_key
+- browser_launcher.py 已在运行
+
+【工作流程】
+1. 连接 CDP 浏览器
+2. 访问 TikTok 客服页面
+3. 检查未分配/未读消息
+4. 分配消息给自己
+5. 生成并发送回复
+6. 等待下一轮检查
 """
 
 import json
@@ -26,9 +45,17 @@ from datetime import datetime
 from pathlib import Path
 
 # ==================== 配置 ====================
-CHECK_INTERVAL = 300  # 5 分钟 (秒)
+# 检查间隔（秒）- 默认 5 分钟
+CHECK_INTERVAL = 300
+
+# TikTok 卖家客服页面地址
 TIKTOK_URL = "https://seller.tiktokshopglobalselling.com/chat/inbox/current"
+
+# 已回复消息状态文件（自动创建）
 STATE_FILE = Path(__file__).parent / "ralph_state.json"
+
+# CDP Endpoint - 默认从环境变量读取，否则使用默认值
+CDP_ENDPOINT = os.environ.get("PLAYWRIGHT_MCP_CDP_ENDPOINT", "http://localhost:9222")
 
 
 # ==================== 日志工具 ====================
@@ -97,14 +124,15 @@ def build_opencode_prompt(tiktok_url: str, replied_msgs: str) -> str:
 3. 截图检查页面状态
 4. 如需要登录，请等待用户手动登录后按回车继续
 5. 检查是否有**未分配**，**未读消息**，**紧急消息**等（红点、数字徽章、新消息提示等）
-6. 如有未回复消息：
+6. 如果有未分配的消息，全部分配给自己，直到没有未分配消息
+7. 如有未回复消息：
    - 点击进入聊天会话
    - 截图阅读买家最新消息
    - 生成友好、专业的中文回复
    - 在输入框输入回复内容
    - 点击发送按钮
    - 等待消息发送成功
-7. 重复步骤5-6，直到没有未回复消息或达到操作限制
+8. 重复步骤5-7，直到没有未回复消息或达到操作限制(**每次最多回复10个用户**，保持上下文干净)
 
 ## 已回复消息（避免重复回复）
 {replied_msgs}
@@ -113,19 +141,10 @@ def build_opencode_prompt(tiktok_url: str, replied_msgs: str) -> str:
 - 语气友好、专业、简洁
 - 如果是产品咨询，提供有帮助的信息
 - 如果是售后问题，表示愿意协助解决
-- 回复控制在 100 字以内
+- 回复控制在 50 字以内
 - 如果是重复消息，请跳过回复
+- **!!重要!!**: 如果无法确定回复内容，可以回复“感谢您的消息，我们会尽快回复您！”等通用回复
 
-## 返回格式（JSON）
-请在最后输出以下 JSON 格式的结果：
-```json
-{{
-    "has_new_message": true/false,
-    "msg_id": "消息唯一标识（如买家名称+时间+内容摘要）",
-    "buyer_msg": "买家消息内容",
-    "replied": true/false,
-    "reply_content": "回复内容"
-}}
 ```
 """
 
@@ -141,6 +160,7 @@ def call_opencode(prompt: str, working_dir: str, cdp_endpoint: str) -> dict:
     # 创建临时文件存储提示词
     prompt_file = Path("/tmp/ralph_prompt.txt")
     prompt_file.write_text(prompt)
+    log(f"提示词已写入临时文件: {prompt_file}")
 
     # 设置 CDP 环境变量
     env = os.environ.copy()
@@ -245,12 +265,12 @@ def call_opencode(prompt: str, working_dir: str, cdp_endpoint: str) -> dict:
             log(f"OpenCode stderr 摘要: {stderr_output[:500]}", "DEBUG")
 
         # 尝试提取 JSON 部分
-        json_result = extract_json_from_output(output)
+        # json_result = extract_json_from_output(output)
 
         return {
             "success": process.returncode == 0,
             "output": output,
-            "result": json_result
+            # "result": output
         }
 
     except Exception as e:
@@ -407,16 +427,8 @@ def main():
     setup_mcp()
 
     # 获取 CDP endpoint
-    cdp_endpoint = os.environ.get("PLAYWRIGHT_MCP_CDP_ENDPOINT")
-    if not cdp_endpoint:
-        log("错误: 未设置 PLAYWRIGHT_MCP_CDP_ENDPOINT 环境变量", "ERROR")
-        log("请先运行 browser_launcher.py 启动浏览器", "ERROR")
-        log("")
-        log("用法:")
-        log("  终端1: uv run python browser_launcher.py")
-        log("  终端2: export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222")
-        log("         uv run python agent_runner.py")
-        sys.exit(1)
+    cdp_endpoint = CDP_ENDPOINT
+    log(f"使用 CDP endpoint: {cdp_endpoint}")
 
     # 启动主循环
     main_loop(cdp_endpoint)

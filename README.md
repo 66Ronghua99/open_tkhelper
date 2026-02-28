@@ -1,156 +1,285 @@
-# Ralph Loop - TikTok 客服自动回复
+# Open TKHelper - 基于 OpenCode 的 TikTok 客服助手
 
-一个基于 Playwright + OpenCode MCP 的 TikTok 客服自动回复工具。
+一个基于 OpenCode + Playwright MCP 的 TikTok 客服自动回复工具。通过 CDP（Chrome DevTools Protocol）连接浏览器，让 AI 代理自动监控和回复客服消息。
 
 ## 架构
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  ralph_loop.py  │────▶│  OpenCode CLI   │────▶│ TikTok 卖家中心  │
-│                 │     │  + Playwright   │     │    客服聊天      │
-└─────────────────┘     │     MCP         │     └─────────────────┘
-                        └─────────────────┘
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│ browser_launcher.py │────▶│   CDP 浏览器实例     │◀────│  agent_runner.py    │
+│   (浏览器管理)       │     │  http://localhost:   │     │   (Agent 操作)       │
+└─────────────────────┘     │       9222           │     └─────────────────────┘
+                            └─────────────────────┘              │
+                                                                   │
+                            ┌─────────────────────┐              │
+                            │   OpenCode CLI      │◀─────────────┘
+                            │ + Playwright MCP    │
+                            └─────────────────────┘
+                                    │
+                                    ▼
+                            ┌─────────────────────┐
+                            │  TikTok 卖家中心    │
+                            │     客服聊天        │
+                            └─────────────────────┘
 ```
 
-## 快速开始
+**分离式架构优势：**
+- 浏览器独立运行，Agent 可多次连接
+- 登录状态持久保持，无需重复登录
+- 支持多个 Agent 复用同一浏览器
 
-### 1. 安装依赖
+## 安装配置
+
+### 1. 克隆仓库
 
 ```bash
-cd ~/codes/ralph-loop
+git clone https://github.com/66Ronghua99/open_tkhelper.git
+cd open_tkhelper
+```
+
+### 2. 安装 Python 依赖
+
+本项目使用 `uv` 作为包管理器：
+
+```bash
+# 安装 uv（如未安装）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 同步依赖
 uv sync
 ```
 
-### 2. 配置 Playwright MCP
+### 3. 安装 OpenCode CLI
 
-确保 OpenCode 已配置 Playwright MCP:
+```bash
+# 通过 npm 安装
+npm install -g opencode
+
+# 验证安装
+opencode --version
+```
+
+### 4. 配置 Playwright MCP
 
 ```bash
 # 检查是否已配置
 opencode mcp list
 
-# 如未配置，手动添加
-opencode mcp add playwright --command "npx" --args "@anthropic/playwright-mcp-server"
+# 如未配置，添加 Playwright MCP
+opencode mcp add --name playwright --command npx --args "@playwright/mcp@latest"
 ```
 
-### 3. 调试选择器（首次运行）
-
-TikTok 页面结构可能变化，先运行调试工具确认选择器:
+### 5. 配置 OpenCode API Key
 
 ```bash
-uv run python debug_selectors.py
+# 设置环境变量
+export ANTHROPIC_API_KEY=your_api_key_here
+
+# 或者使用 opencode 配置
+opencode config set api_key your_api_key_here
 ```
 
-按提示操作，根据输出更新 `ralph_loop.py` 中的 `SELECTORS` 配置。
+## 使用方式
 
-### 4. 运行主程序
+### 方式一：分离运行（推荐）
+
+**终端 1 - 启动浏览器：**
 
 ```bash
-uv run python ralph_loop.py
+uv run python browser_launcher.py
 ```
 
-首次运行需要手动登录 TikTok，登录后 Cookie 会自动保存。
+浏览器启动后会显示 CDP endpoint，保持此终端运行。
+
+**终端 2 - 运行 Agent：**
+
+```bash
+# 设置环境变量
+export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222
+
+# 运行 Agent（循环模式，每 5 分钟检查一次）
+uv run python agent_runner.py
+```
+
+或者单次运行：
+
+```bash
+PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222 uv run python agent_runner.py
+```
+
+### 方式二：快捷脚本
+
+创建一个启动脚本 `start.sh`：
+
+```bash
+#!/bin/bash
+# 启动浏览器（后台运行）
+uv run python browser_launcher.py &
+BROWSER_PID=$!
+
+# 等待浏览器启动
+sleep 3
+
+# 运行 Agent
+export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222
+uv run python agent_runner.py
+
+# 清理
+kill $BROWSER_PID
+```
 
 ## 文件说明
 
 | 文件 | 说明 |
 |------|------|
-| `ralph_loop.py` | 主程序，监控循环 |
-| `debug_selectors.py` | 调试工具，帮助识别页面选择器 |
-| `tiktok_cookies.json` | 登录状态（自动生成） |
+| `browser_launcher.py` | 浏览器启动器，管理 CDP 浏览器实例 |
+| `agent_runner.py` | Agent 操作脚本，调用 OpenCode 执行客服任务 |
 | `ralph_state.json` | 已回复消息记录（自动生成） |
-
-## 配置说明
-
-### SELECTORS 配置
-
-在 `ralph_loop.py` 中修改选择器以匹配实际页面:
-
-```python
-SELECTORS = {
-    "unread_badge": "...",     # 未读消息徽章
-    "chat_list_item": "...",   # 聊天列表项
-    "message_bubble": "...",   # 消息气泡
-    "chat_input": "...",       # 输入框
-    "send_button": "...",      # 发送按钮
-}
-```
-
-### 运行参数
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `CHECK_INTERVAL` | 30 | 检查间隔（秒） |
-| `TIKTOK_SELLER_URL` | https://seller.tiktok.com | 卖家中心地址 |
-| `CHAT_URL` | .../apps/seller-chat | 客服聊天地址 |
+| `browser_data/` | 浏览器持久化数据目录（包含登录状态） |
 
 ## 工作流程
 
 ```
-启动
-  │
-  ▼
-检查 Cookie ──无──▶ 打开登录页 ──▶ 手动登录 ──▶ 保存 Cookie
-  │
-  有
-  ▼
-加载 Cookie
-  │
-  ▼
-访问客服聊天页
-  │
-  ▼
-┌──────────────┐
-│   主循环     │◄──────────────────┐
-│              │                   │
-│ 1. 刷新页面  │                   │
-│ 2. 检查未读  │                   │
-│ 3. 有新消息? │──否──┐            │
-└──────────────┘      │            │
-      │              │            │
-     是              │            │
-      │              │            │
-      ▼              │            │
-┌──────────────┐     │            │
-│ 获取买家消息 │     │            │
-│ 调用 OpenCode│     │            │
-│ 生成并发送   │     │            │
-│ 回复         │     │            │
-└──────────────┘     │            │
-      │              │            │
-      └──────────────┘            │
-              │                   │
-              ▼                   │
-        等待 30 秒 ───────────────┘
+启动 browser_launcher.py
+        │
+        ▼
+启动浏览器 + CDP 调试端口
+        │
+        ▼
+等待 Agent 连接（保持运行）
+        │
+        ◀──────────────────┐
+        │                   │
+   Agent Runner 启动        │
+        │                   │
+        ▼                   │
+通过 CDP 连接浏览器         │
+        │                   │
+        ▼                   │
+┌──────────────┐           │
+│   主循环     │◀──────────┤
+│              │           │
+│ 1. 访问页面  │           │
+│ 2. 检查未读  │           │
+│ 3. 有新消息? │──否───────┤
+└──────────────┘           │
+        │                  │
+       是                  │
+        │                  │
+        ▼                  │
+┌──────────────┐          │
+│ 获取买家消息 │          │
+│ 生成回复     │          │
+│ 发送消息     │          │
+└──────────────┘          │
+        │                 │
+        └─────────────────┘
+                │
+                ▼
+        等待 5 分钟后再次检查
 ```
+
+## 配置说明
+
+### 检查间隔
+
+在 `agent_runner.py` 中修改：
+
+```python
+CHECK_INTERVAL = 300  # 5 分钟（秒）
+```
+
+### TikTok 客服地址
+
+```python
+TIKTOK_URL = "https://seller.tiktokshopglobalselling.com/chat/inbox/current"
+```
+
+### CDP 端口
+
+在 `browser_launcher.py` 中修改：
+
+```python
+CDP_PORT = 9222  # Chrome DevTools Protocol 端口
+```
+
+## 首次使用
+
+1. **启动浏览器**
+   ```bash
+   uv run python browser_launcher.py
+   ```
+
+2. **手动登录 TikTok**
+   - 浏览器窗口会自动打开
+   - 访问 TikTok 卖家中心并登录
+   - 登录状态会自动保存到 `browser_data/`
+
+3. **运行 Agent**
+   ```bash
+   export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222
+   uv run python agent_runner.py
+   ```
+
+4. **验证工作**
+   - Agent 会访问客服页面
+   - 检查未读消息并自动回复
+   - 查看终端输出确认运行正常
 
 ## 注意事项
 
-1. **选择器适配**: TikTok 页面可能更新，需要使用 `debug_selectors.py` 重新识别
-2. **Rate Limiting**: 避免过于频繁的检查，建议间隔 ≥30 秒
-3. **消息去重**: 已回复的消息会记录在 `ralph_state.json` 中，避免重复回复
-4. **安全性**: Cookie 文件包含登录凭证，不要提交到 Git
+1. **登录状态**：首次登录后，Cookie 会保存在 `browser_data/` 目录，后续无需重复登录
+2. **消息去重**：已回复的消息记录在 `ralph_state.json`，避免重复回复
+3. **Rate Limiting**：默认 5 分钟检查一次，避免过于频繁
+4. **安全性**：`browser_data/` 包含登录凭证，不要提交到 Git（已在 `.gitignore` 中排除）
+5. **浏览器保持**：`browser_launcher.py` 需要保持运行以维持浏览器状态
 
 ## 故障排查
 
 ### OpenCode 未找到 MCP
 
 ```bash
-opencode mcp add playwright --command "npx" --args "@anthropic/playwright-mcp-server"
+opencode mcp add --name playwright --command npx --args "@playwright/mcp@latest"
 ```
 
-### 选择器不匹配
+### CDP 连接失败
 
-运行调试工具获取正确的选择器:
+1. 检查浏览器是否已启动：
+   ```bash
+   curl http://localhost:9222/json/version
+   ```
 
-```bash
-uv run python debug_selectors.py
-```
+2. 检查环境变量是否设置：
+   ```bash
+   echo $PLAYWRIGHT_MCP_CDP_ENDPOINT
+   ```
+
+### 浏览器无法启动
+
+1. 检查 Playwright 浏览器是否已安装：
+   ```bash
+   uv run playwright install chromium
+   ```
+
+2. 检查端口 9222 是否被占用：
+   ```bash
+   lsof -i :9222
+   ```
 
 ### 消息检测失败
 
-检查页面是否正常加载，尝试增加等待时间:
+- 检查页面是否正常加载
+- 查看 OpenCode 输出日志
+- 确认 TikTok 页面结构是否有变化
 
-```python
-await asyncio.sleep(5)  # 增加等待时间
-```
+## 技术栈
+
+- **Python 3.12+**
+- **Playwright** - 浏览器自动化
+- **OpenCode** - AI 代理框架
+- **CDP (Chrome DevTools Protocol)** - 浏览器远程调试
+- **uv** - Python 包管理
+
+## 许可证
+
+MIT License
