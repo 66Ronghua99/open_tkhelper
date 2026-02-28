@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
 """
-Ralph Loop - TikTok 客服自动回复循环 (简化版)
+Agent Runner - TikTok 客服 Agent 操作脚本
 
-架构: OpenCode 全自主模式
-- Ralph Loop: 极简定时触发器 (15分钟周期)
-- OpenCode: 负责所有浏览器操作 (启动、检测、回复、关闭)
+负责调用 OpenCode 执行具体的客服操作。
+需要配合 browser_launcher.py 启动的 CDP 浏览器使用。
+
+用法:
+    # 先启动浏览器（终端1）
+    uv run python browser_launcher.py
+
+    # 再运行 Agent（终端2）
+    export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222
+    uv run python agent_runner.py
+
+    # 或者单次运行
+    PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222 uv run python agent_runner.py
 """
 
 import json
@@ -17,10 +27,8 @@ from pathlib import Path
 
 # ==================== 配置 ====================
 CHECK_INTERVAL = 300  # 5 分钟 (秒)
-USER_DATA_DIR = Path(__file__).parent / "browser_data"
 TIKTOK_URL = "https://seller.tiktokshopglobalselling.com/chat/inbox/current"
 STATE_FILE = Path(__file__).parent / "ralph_state.json"
-CDP_PORT = 9222  # Chrome DevTools Protocol 端口
 
 
 # ==================== 日志工具 ====================
@@ -68,76 +76,6 @@ class StateManager:
         if not self.replied_msgs:
             return "无"
         return "\n".join([f"- {msg_id}" for msg_id in list(self.replied_msgs)[-10:]])
-
-
-# ==================== 浏览器管理（CDP 模式）====================
-class BrowserManager:
-    """管理浏览器实例，通过 CDP 供 OpenCode 连接"""
-
-    def __init__(self, user_data_dir: Path, cdp_port: int):
-        self.user_data_dir = user_data_dir
-        self.cdp_port = cdp_port
-        self.cdp_endpoint = f"http://localhost:{cdp_port}"
-        self.browser = None
-        self.context = None
-        self.playwright = None
-
-    def start(self) -> bool:
-        """启动浏览器并返回 CDP endpoint"""
-        try:
-            from playwright.sync_api import sync_playwright
-
-            log(f"启动浏览器 (CDP port: {self.cdp_port})...")
-            self.playwright = sync_playwright().start()
-
-            # 启动持久化上下文并开启远程调试
-            self.context = self.playwright.chromium.launch_persistent_context(
-                user_data_dir=str(self.user_data_dir),
-                args=[f"--remote-debugging-port={self.cdp_port}"],
-                headless=False,
-                viewport={"width": 1280, "height": 720},
-            )
-
-            # 获取或创建页面
-            if self.context.pages:
-                page = self.context.pages[0]
-            else:
-                page = self.context.new_page()
-
-            log(f"浏览器已启动，CDP endpoint: {self.cdp_endpoint}")
-            log(f"当前页面: {page.url}")
-
-            return True
-
-        except Exception as e:
-            log(f"启动浏览器失败: {e}", "ERROR")
-            import traceback
-            traceback.print_exc()
-            return False
-
-    def stop(self):
-        """关闭浏览器"""
-        try:
-            if self.context:
-                self.context.close()
-                log("浏览器上下文已关闭")
-            if self.playwright:
-                self.playwright.stop()
-                log("Playwright 已停止")
-        except Exception as e:
-            log(f"关闭浏览器时出错: {e}", "WARN")
-
-    def navigate(self, url: str) -> bool:
-        """导航到指定 URL"""
-        try:
-            if self.context and self.context.pages:
-                page = self.context.pages[0]
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                log(f"已导航到: {url}")
-                return True
-        except Exception as e:
-            log(f"导航失败: {e}", "ERROR")
-        return False
 
 
 # ==================== OpenCode 提示词构建 ====================
@@ -207,7 +145,7 @@ def call_opencode(prompt: str, working_dir: str, cdp_endpoint: str) -> dict:
     # 设置 CDP 环境变量
     env = os.environ.copy()
     env["PLAYWRIGHT_MCP_CDP_ENDPOINT"] = cdp_endpoint
-    log(f"设置 CDP endpoint: {cdp_endpoint}")
+    log(f"使用 CDP endpoint: {cdp_endpoint}")
 
     output_lines = []
     error_lines = []
@@ -376,71 +314,66 @@ def setup_mcp():
         log(f"MCP 配置检查失败: {e}", "WARN")
 
 
-# ==================== 主循环 ====================
-def main_loop():
-    """主监控循环 - CDP 模式"""
+# ==================== 单次运行 ====================
+def run_once(state: StateManager, working_dir: str, cdp_endpoint: str) -> dict:
+    """执行单次检查"""
+    log("-" * 50)
+    log("开始检查...")
 
+    # 1. 构建 OpenCode 提示词
+    prompt = build_opencode_prompt(
+        TIKTOK_URL,
+        state.get_replied_list_text()
+    )
+
+    # 2. 调用 OpenCode
+    response = call_opencode(prompt, working_dir, cdp_endpoint)
+
+    # 3. 解析结果
+    if response.get("success"):
+        result = response.get("result", {})
+
+        has_new = result.get("has_new_message", False)
+        replied = result.get("replied", False)
+        msg_id = result.get("msg_id", "")
+        buyer_msg = result.get("buyer_msg", "")
+
+        if has_new:
+            log(f"[检测到新消息] 买家: {buyer_msg[:50]}...")
+
+            if replied and msg_id:
+                state.mark_replied(msg_id)
+                reply_content = result.get("reply_content", "")
+                log(f"[已回复] {reply_content[:50]}...")
+            elif not replied:
+                log("[未回复] 可能是重复消息或无需回复")
+        else:
+            log("[无新消息]")
+    else:
+        error = response.get("error", "unknown")
+        log(f"[OpenCode 失败] {error}", "ERROR")
+
+    return response
+
+
+# ==================== 主循环 ====================
+def main_loop(cdp_endpoint: str):
+    """主监控循环"""
     state = StateManager(STATE_FILE)
     working_dir = str(Path(__file__).parent)
 
-    # 启动浏览器（CDP 模式）
-    browser_manager = BrowserManager(USER_DATA_DIR, CDP_PORT)
-    if not browser_manager.start():
-        log("浏览器启动失败，退出", "ERROR")
-        sys.exit(1)
-
     log("=" * 50)
-    log("Ralph Loop 已启动 (CDP 模式)")
+    log("Agent Runner 已启动")
+    log(f"CDP Endpoint: {cdp_endpoint}")
     log(f"检查间隔: {CHECK_INTERVAL} 秒 ({CHECK_INTERVAL // 60} 分钟)")
-    log(f"浏览器数据目录: {USER_DATA_DIR}")
-    log(f"CDP Endpoint: {browser_manager.cdp_endpoint}")
     log("=" * 50)
 
     try:
         while True:
             try:
-                log("-" * 50)
-                log("开始新一轮检查...")
+                run_once(state, working_dir, cdp_endpoint)
 
-                # 1. 构建 OpenCode 提示词（CDP 模式，不启动浏览器）
-                prompt = build_opencode_prompt(
-                    TIKTOK_URL,
-                    state.get_replied_list_text()
-                )
-
-                # 2. 调用 OpenCode（带 CDP 环境变量）
-                response = call_opencode(
-                    prompt,
-                    working_dir,
-                    browser_manager.cdp_endpoint
-                )
-
-                # 3. 解析结果
-                if response.get("success"):
-                    result = response.get("result", {})
-
-                    has_new = result.get("has_new_message", False)
-                    replied = result.get("replied", False)
-                    msg_id = result.get("msg_id", "")
-                    buyer_msg = result.get("buyer_msg", "")
-
-                    if has_new:
-                        log(f"[检测到新消息] 买家: {buyer_msg[:50]}...")
-
-                        if replied and msg_id:
-                            state.mark_replied(msg_id)
-                            reply_content = result.get("reply_content", "")
-                            log(f"[已回复] {reply_content[:50]}...")
-                        elif not replied:
-                            log("[未回复] 可能是重复消息或无需回复")
-                    else:
-                        log("[无新消息]")
-
-                else:
-                    error = response.get("error", "unknown")
-                    log(f"[OpenCode 失败] {error}", "ERROR")
-
-                # 4. 等待下一轮
+                # 等待下一轮
                 log(f"等待 {CHECK_INTERVAL} 秒后再次检查...")
                 time.sleep(CHECK_INTERVAL)
 
@@ -454,14 +387,12 @@ def main_loop():
                 time.sleep(60)  # 出错后等待 1 分钟再重试
 
     finally:
-        # 确保浏览器被关闭
-        log("关闭浏览器...")
-        browser_manager.stop()
+        log("Agent Runner 已停止")
 
 
 # ==================== 入口 ====================
-if __name__ == "__main__":
-    log("Ralph Loop 启动中...")
+def main():
+    log("Agent Runner 启动中...")
 
     # 检查 opencode 是否可用
     try:
@@ -472,15 +403,24 @@ if __name__ == "__main__":
         log("请安装 OpenCode: npm install -g opencode", "ERROR")
         sys.exit(1)
 
-    # 检查 user_data_dir 是否存在
-    if not USER_DATA_DIR.exists():
-        log(f"创建浏览器数据目录: {USER_DATA_DIR}")
-        USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    else:
-        log(f"使用现有浏览器数据目录: {USER_DATA_DIR}")
-
     # 设置 MCP
     setup_mcp()
 
+    # 获取 CDP endpoint
+    cdp_endpoint = os.environ.get("PLAYWRIGHT_MCP_CDP_ENDPOINT")
+    if not cdp_endpoint:
+        log("错误: 未设置 PLAYWRIGHT_MCP_CDP_ENDPOINT 环境变量", "ERROR")
+        log("请先运行 browser_launcher.py 启动浏览器", "ERROR")
+        log("")
+        log("用法:")
+        log("  终端1: uv run python browser_launcher.py")
+        log("  终端2: export PLAYWRIGHT_MCP_CDP_ENDPOINT=http://localhost:9222")
+        log("         uv run python agent_runner.py")
+        sys.exit(1)
+
     # 启动主循环
-    main_loop()
+    main_loop(cdp_endpoint)
+
+
+if __name__ == "__main__":
+    main()
