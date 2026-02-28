@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Ralph Loop generated files
+tiktok_cookies.json
+ralph_state.json
+debug_screenshot.png
+debug_page.html
